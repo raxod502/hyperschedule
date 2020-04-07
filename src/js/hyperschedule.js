@@ -88,6 +88,7 @@ const courseDescriptionBoxOuter = document.getElementById(
 );
 
 const selectedCoursesList = document.getElementById("selected-courses-list");
+const createGroupButton = document.getElementById("create-group-button");
 
 const scheduleTable = document.getElementById("schedule-table");
 const scheduleTableBody = document.getElementById("schedule-table-body");
@@ -107,7 +108,9 @@ const importExportCopyButton = document.getElementById(
 //// Global state
 
 // Persistent data.
+let gGroupCounter = 0;
 let gApiData = null;
+let gNestedSelectedCoursesAndGroups = [];
 let gSelectedCourses = [];
 let gScheduleTabSelected = false;
 let gShowClosedCourses = true;
@@ -119,6 +122,11 @@ let gGreyConflictCourses = greyConflictCoursesOptions[0];
 let gCurrentlySorting = false;
 let gCourseEntityHeight = 0;
 let gFilteredCourseKeys = [];
+let gFocusedGroupTextBox = null; // group text box currently being typed in
+let gFocusedGroupTextBoxSelection = [0, 0]; // selected text in focused text box
+// keeps track of function that checks for clicking anywhere but group naming
+// box, so it can be deleted later
+let gClickAwayFunction = null;
 
 /// Utility functions
 //// JavaScript utility functions
@@ -834,10 +842,22 @@ function attachListeners() {
     "click",
     saveImportExportModalChanges
   );
-  sortable(".sortable-list", {
-    forcePlaceholderSize: true,
-    placeholder: createCourseEntity("placeholder").outerHTML
+  let sortableList = Sortable.create(selectedCoursesList, {
+    handle: ".course-box-text",
+    ghostClass: "placeholder",
+    group: "courses",
+    emptyInsertThreshold: 15,
+    onSort: function(evt) {
+      readSelectedCoursesList();
+    },
+    onStart: function(evt) {
+      gCurrentlySorting = true;
+    },
+    onEnd: function(evt) {
+      gCurrentlySorting = false;
+    }
   });
+
   printAllButton.addEventListener("click", () => {
     downloadPDF(false);
   });
@@ -850,12 +870,17 @@ function attachListeners() {
     "click",
     minimizeCourseDescription
   );
-  selectedCoursesList.addEventListener("sortupdate", readSelectedCoursesList);
-  selectedCoursesList.addEventListener("sortstart", () => {
-    gCurrentlySorting = true;
+  selectedCoursesList.addEventListener("coursenametyping", () => {
+    sortableList.option("disabled", true);
   });
-  selectedCoursesList.addEventListener("sortstop", () => {
-    gCurrentlySorting = false;
+  selectedCoursesList.addEventListener("coursenametypingdone", () => {
+    sortableList.option("disabled", false);
+  });
+
+  createGroupButton.addEventListener("click", event => {
+    // catch click so doesn't propagate to click away function in group
+    catchEvent(event);
+    createGroup();
   });
 
   courseSearchResults.addEventListener("scroll", rerenderCourseSearchResults);
@@ -900,137 +925,307 @@ function createCourseEntity(course, attrs) {
   attrs = attrs || {};
   const idx = attrs.idx;
   const alreadyAdded = attrs.alreadyAdded;
-
   const listItem = document.createElement("li");
   listItem.classList.add("course-box");
 
   const listItemContent = document.createElement("div");
   listItemContent.classList.add("course-box-content");
-  if (course !== "placeholder") {
-    listItemContent.style["background-color"] = getCourseColor(course);
-  }
-  listItemContent.addEventListener("click", () => {
-    setCourseDescriptionBox(course);
-  });
   listItem.appendChild(listItemContent);
 
-  const selectLabel = document.createElement("label");
-  selectLabel.classList.add("course-box-select-label");
-
-  const selectIcon = document.createElement("i");
-  selectIcon.classList.add("course-box-select-icon");
-  selectIcon.classList.add("icon");
-  if (!!course.selected) {
-    selectLabel.classList.add("course-selected");
-    selectIcon.classList.add("ion-android-checkbox");
-  } else {
-    selectIcon.classList.add("ion-android-checkbox-outline-blank");
-  }
-
-  const selectToggle = document.createElement("input");
-  selectToggle.setAttribute("type", "checkbox");
-  selectToggle.classList.add("course-box-button");
-  selectToggle.classList.add("course-box-toggle");
-  selectToggle.classList.add("course-box-select-toggle");
-  selectToggle.checked = !!course.selected;
-  selectToggle.addEventListener("change", () => {
-    if (selectLabel.classList.contains("course-selected")) {
-      selectLabel.classList.remove("course-selected");
-      selectIcon.classList.remove("ion-android-checkbox");
-      selectIcon.classList.add("ion-android-checkbox-outline-blank");
-    } else {
-      selectLabel.classList.add("course-selected");
-      selectIcon.classList.remove("ion-android-checkbox-outline-blank");
-      selectIcon.classList.add("ion-android-checkbox");
+  //////// CREATING GROUP
+  if (course.type === "group") {
+    //////// VARIOUS HELPER FUNCTIONS
+    function beginGroupNameChange(course) {
+      if (gClickAwayFunction != null) {
+        // remove any existing listener
+        document.removeEventListener("mousedown", gClickAwayFunction);
+      }
+      gClickAwayFunction = clickHandler(course); // create reference to allow removal
+      document.addEventListener("mousedown", gClickAwayFunction);
+      // event signals to disallow drag-and-drop while renaming
+      selectedCoursesList.dispatchEvent(new CustomEvent("coursenametyping"));
+      let textBox = document.createElement("input");
+      textBox.setAttribute("type", "text");
+      textBox.setAttribute("value", course.title);
+      textBox.classList.add("group-box-typing-box");
+      groupNameContainer.appendChild(textBox);
+      gFocusedGroupTextBox = textBox;
     }
 
-    toggleCourseSelected(course);
-  });
-  selectToggle.addEventListener("click", catchEvent);
-  selectLabel.addEventListener("click", catchEvent);
-  selectLabel.appendChild(selectToggle);
-  selectLabel.appendChild(selectIcon);
-  listItemContent.appendChild(selectLabel);
-
-  const starLabel = document.createElement("label");
-  starLabel.classList.add("course-box-star-label");
-
-  const starToggle = document.createElement("input");
-  starToggle.setAttribute("type", "checkbox");
-  starToggle.classList.add("course-box-button");
-  starToggle.classList.add("course-box-toggle");
-  starToggle.classList.add("course-box-star-toggle");
-
-  const starIcon = document.createElement("i");
-  starIcon.classList.add("course-box-star-icon");
-  starIcon.classList.add("icon");
-
-  if (course !== "placeholder") {
-    starLabel.classList.add("star-visible");
-  }
-  starToggle.checked = !!course.starred;
-  if (!!course.starred) {
-    starLabel.classList.add("star-checked");
-    starIcon.classList.add("ion-android-star");
-  } else {
-    starIcon.classList.add("ion-android-star-outline");
-  }
-  starToggle.addEventListener("change", () => {
-    if (starLabel.classList.contains("star-checked")) {
-      starLabel.classList.remove("star-checked");
-      starIcon.classList.remove("ion-android-star");
-      starIcon.classList.add("ion-android-star-outline");
-    } else {
-      starLabel.classList.add("star-checked");
-      starIcon.classList.remove("ion-android-star-outline");
-      starIcon.classList.add("ion-android-star");
+    function endGroupNameChange(course) {
+      if (gFocusedGroupTextBox != null) {
+        // triggers losing focus, focus out event has rest of functionality
+        gFocusedGroupTextBox.blur();
+        gFocusedGroupTextBox = null;
+        course.naming = false;
+      }
     }
 
-    toggleCourseStarred(course);
-  });
-  starToggle.addEventListener("click", catchEvent);
-  starLabel.addEventListener("click", catchEvent);
+    // double click to start naming process
+    function doubleClickHandler(course) {
+      return function(event) {
+        // prevent errors when double clicking already editing box
+        if (course.naming != true) {
+          course.naming = true;
+          groupNameContainer.removeChild(groupNameContainer.lastChild);
+          beginGroupNameChange(course);
+          gFocusedGroupTextBoxSelection = [0, 0];
+          gFocusedGroupTextBox.focus();
+        }
+      };
+    }
 
-  starLabel.appendChild(starToggle);
-  starLabel.appendChild(starIcon);
-  listItemContent.appendChild(starLabel);
+    //  clicking on page, not on group name text box ends naming process
+    function clickHandler(course) {
+      return function(event) {
+        if ($(event.target).closest(".group-box-typing-box").length === 0) {
+          document.removeEventListener("mousedown", gClickAwayFunction);
+          endGroupNameChange(course);
+        }
+      };
+    }
 
-  const textBox = document.createElement("p");
-  textBox.classList.add("course-box-text");
-  listItemContent.appendChild(textBox);
+    // hitting enter while in group name text box ends naming process
+    function enterHandler(course) {
+      return function(event) {
+        if (event.keyCode === 13) {
+          endGroupNameChange(course);
+        }
+      };
+    }
 
-  let courseCode;
-  let text;
-  if (course === "placeholder") {
-    courseCode = "placeholder";
-    text = "placeholder";
-  } else {
-    courseCode = course.courseCode;
-    text = courseToString(course);
-  }
+    /////////////// Create group DOM element
+    const minimizeLabel = document.createElement("label");
+    minimizeLabel.classList.add("course-box-minimize-label");
 
-  const courseCodeContainer = document.createElement("span");
-  const courseCodeNode = document.createTextNode(courseCode);
-  courseCodeContainer.classList.add("course-box-course-code");
-  courseCodeContainer.appendChild(courseCodeNode);
+    const minimizeIcon = document.createElement("i");
+    minimizeIcon.classList.add("course-box-minimize-icon");
+    minimizeIcon.classList.add("icon");
 
-  const courseNameNode = document.createTextNode(text);
-
-  textBox.appendChild(courseCodeContainer);
-  textBox.appendChild(courseNameNode);
-
-  if (!alreadyAdded) {
-    const addButton = document.createElement("i");
-    addButton.classList.add("course-box-button");
-    addButton.classList.add("course-box-add-button");
-    addButton.classList.add("icon");
-    addButton.classList.add("ion-plus");
-
-    addButton.addEventListener("click", () => {
-      addCourse(course);
+    const minimizeToggle = document.createElement("input");
+    minimizeToggle.setAttribute("type", "checkbox");
+    minimizeToggle.classList.add("course-box-button");
+    minimizeToggle.classList.add("course-box-minimize-toggle");
+    minimizeToggle.checked = !!course.minimized;
+    minimizeToggle.addEventListener("click", () => {
+      if (minimizeLabel.classList.contains("course-minimized")) {
+        minimizeLabel.classList.remove("course-minimized");
+        minimizeIcon.classList.remove("ion-arrow-down-b");
+        minimizeIcon.classList.add("ion-arrow-right-b");
+      } else {
+        minimizeLabel.classList.add("course-minimized");
+        minimizeIcon.classList.remove("ion-arrow-right-b");
+        minimizeIcon.classList.add("ion-arrow-down-b");
+      }
+      toggleGroupMinimized(course);
     });
-    addButton.addEventListener("click", catchEvent);
-    listItemContent.appendChild(addButton);
+    minimizeToggle.addEventListener("click", catchEvent);
+    minimizeLabel.addEventListener("click", catchEvent);
+    minimizeLabel.appendChild(minimizeToggle);
+    minimizeLabel.appendChild(minimizeIcon);
+    listItemContent.appendChild(minimizeLabel);
+
+    listItemContent.classList.add("group-box-content");
+    const groupNameContainer = document.createElement("span");
+    groupNameContainer.classList.add("course-box-text");
+    groupNameContainer.classList.add("course-box-course-code");
+
+    if (course.naming) {
+      beginGroupNameChange(course);
+    } else {
+      let groupNameNode = document.createTextNode(course.title);
+      groupNameContainer.appendChild(groupNameNode);
+    }
+
+    listItemContent.appendChild(groupNameContainer);
+
+    groupNameContainer.addEventListener("dblclick", doubleClickHandler(course));
+    groupNameContainer.addEventListener("keyup", enterHandler(course));
+
+    groupNameContainer.addEventListener("focusout", () => {
+      let textBox = groupNameContainer.lastChild;
+      course.title = textBox.value;
+      if (gFocusedGroupTextBox != null) {
+        // record current selection
+        gFocusedGroupTextBoxSelection[0] = textBox.selectionStart;
+        gFocusedGroupTextBoxSelection[1] = textBox.selectionEnd;
+      }
+      let groupNameNode = document.createTextNode(course.title);
+      groupNameContainer.removeChild(textBox);
+      groupNameContainer.appendChild(groupNameNode);
+      // dispatches event to reallow drag and drop
+      selectedCoursesList.dispatchEvent(
+        new CustomEvent("coursenametypingdone")
+      );
+    });
+
+    let groupNode = document.createElement("UL");
+    groupNode.classList.add("group-list");
+    let sortableGroupList = Sortable.create(groupNode, {
+      handle: ".course-box-text",
+      ghostClass: "placeholder",
+      group: "courses",
+      onSort: function(evt) {
+        readSelectedCoursesList();
+      },
+      onStart: function(evt) {
+        gCurrentlySorting = true;
+      },
+      onEnd: function(evt) {
+        gCurrentlySorting = false;
+      },
+      // px, distance mouse must be from empty sortable
+      // to insert drag element into it
+      emptyInsertThreshold: 35
+    });
+
+    if (!!course.minimized) {
+      minimizeLabel.classList.add("course-minimized");
+      minimizeIcon.classList.add("ion-arrow-down-b");
+      groupNode.style.display = "none";
+    } else {
+      minimizeIcon.classList.add("ion-arrow-right-b");
+      groupNode.style.display = "block";
+    }
+
+    // prevent drag and drop while typing course name
+    selectedCoursesList.addEventListener("coursenametyping", () => {
+      sortableGroupList.option("disabled", true);
+    });
+    selectedCoursesList.addEventListener("coursenametypingdone", () => {
+      sortableGroupList.option("disabled", false);
+    });
+    listItem.appendChild(groupNode);
+    listItem.classList.add("group");
+  }
+
+  ////////// CREATING COURSES
+  else {
+    if (course !== "placeholder") {
+      listItemContent.style["background-color"] = getCourseColor(course);
+      listItemContent.addEventListener("click", () => {
+        setCourseDescriptionBox(course);
+      });
+    }
+
+    const selectLabel = document.createElement("label");
+    selectLabel.classList.add("course-box-select-label");
+
+    const selectIcon = document.createElement("i");
+    selectIcon.classList.add("course-box-select-icon");
+    selectIcon.classList.add("icon");
+    if (!!course.selected) {
+      selectLabel.classList.add("course-selected");
+      selectIcon.classList.add("ion-android-checkbox");
+    } else {
+      selectIcon.classList.add("ion-android-checkbox-outline-blank");
+    }
+
+    const selectToggle = document.createElement("input");
+    selectToggle.setAttribute("type", "checkbox");
+    selectToggle.classList.add("course-box-button");
+    selectToggle.classList.add("course-box-toggle");
+    selectToggle.classList.add("course-box-select-toggle");
+    selectToggle.checked = !!course.selected;
+    selectToggle.addEventListener("change", () => {
+      if (selectLabel.classList.contains("course-selected")) {
+        selectLabel.classList.remove("course-selected");
+        selectIcon.classList.remove("ion-android-checkbox");
+        selectIcon.classList.add("ion-android-checkbox-outline-blank");
+      } else {
+        selectLabel.classList.add("course-selected");
+        selectIcon.classList.remove("ion-android-checkbox-outline-blank");
+        selectIcon.classList.add("ion-android-checkbox");
+      }
+
+      toggleCourseSelected(course);
+    });
+    selectToggle.addEventListener("click", catchEvent);
+    selectLabel.addEventListener("click", catchEvent);
+    selectLabel.appendChild(selectToggle);
+    selectLabel.appendChild(selectIcon);
+    listItemContent.appendChild(selectLabel);
+
+    const starLabel = document.createElement("label");
+    starLabel.classList.add("course-box-star-label");
+
+    const starToggle = document.createElement("input");
+    starToggle.setAttribute("type", "checkbox");
+    starToggle.classList.add("course-box-button");
+    starToggle.classList.add("course-box-toggle");
+    starToggle.classList.add("course-box-star-toggle");
+
+    const starIcon = document.createElement("i");
+    starIcon.classList.add("course-box-star-icon");
+    starIcon.classList.add("icon");
+
+    if (course !== "placeholder") {
+      starLabel.classList.add("star-visible");
+    }
+    starToggle.checked = !!course.starred;
+    if (!!course.starred) {
+      starLabel.classList.add("star-checked");
+      starIcon.classList.add("ion-android-star");
+    } else {
+      starIcon.classList.add("ion-android-star-outline");
+    }
+    starToggle.addEventListener("change", () => {
+      if (starLabel.classList.contains("star-checked")) {
+        starLabel.classList.remove("star-checked");
+        starIcon.classList.remove("ion-android-star");
+        starIcon.classList.add("ion-android-star-outline");
+      } else {
+        starLabel.classList.add("star-checked");
+        starIcon.classList.remove("ion-android-star-outline");
+        starIcon.classList.add("ion-android-star");
+      }
+
+      toggleCourseStarred(course);
+    });
+    starToggle.addEventListener("click", catchEvent);
+    starLabel.addEventListener("click", catchEvent);
+
+    starLabel.appendChild(starToggle);
+    starLabel.appendChild(starIcon);
+    listItemContent.appendChild(starLabel);
+
+    const textBox = document.createElement("p");
+    textBox.classList.add("course-box-text");
+    listItemContent.appendChild(textBox);
+    let courseCode;
+    let text;
+    if (course === "placeholder") {
+      courseCode = "p";
+      text = "placeholder";
+    } else {
+      courseCode = course.courseCode;
+      text = courseToString(course);
+    }
+
+    const courseCodeContainer = document.createElement("span");
+    const courseCodeNode = document.createTextNode(courseCode);
+    courseCodeContainer.classList.add("course-box-course-code");
+    courseCodeContainer.appendChild(courseCodeNode);
+    const courseNameNode = document.createTextNode(text);
+    textBox.appendChild(courseCodeContainer);
+    textBox.appendChild(courseNameNode);
+
+    if (!alreadyAdded) {
+      const addButton = document.createElement("i");
+      addButton.classList.add("course-box-button");
+      addButton.classList.add("course-box-add-button");
+      addButton.classList.add("icon");
+      addButton.classList.add("ion-plus");
+
+      addButton.addEventListener("click", () => {
+        addCourse(course);
+      });
+      addButton.addEventListener("click", catchEvent);
+      listItemContent.appendChild(addButton);
+    }
+    if (course === "placeholder") {
+      listItem.classList.add("placeholder");
+    }
   }
 
   const removeButton = document.createElement("i");
@@ -1043,10 +1238,6 @@ function createCourseEntity(course, attrs) {
   });
   removeButton.addEventListener("click", catchEvent);
   listItemContent.appendChild(removeButton);
-
-  if (course === "placeholder") {
-    listItem.classList.add("placeholder");
-  }
 
   if (idx !== undefined) {
     listItem.setAttribute("data-course-index", idx);
@@ -1282,6 +1473,10 @@ function rerenderCourseSearchResults() {
     gFilteredCourseKeys.length != 0 ? "End of results" : "No results";
 }
 
+/*
+Updates the DOM Object selectedCoursesList based on what is in
+gNestedSelectedCoursesAndGroups
+*/
 function updateSelectedCoursesList() {
   if (gCurrentlySorting) {
     // Defer to after the user has finished sorting, otherwise we mess
@@ -1292,13 +1487,42 @@ function updateSelectedCoursesList() {
   while (selectedCoursesList.hasChildNodes()) {
     selectedCoursesList.removeChild(selectedCoursesList.lastChild);
   }
-  for (let idx = 0; idx < gSelectedCourses.length; ++idx) {
-    const course = gSelectedCourses[idx];
-    selectedCoursesList.appendChild(
-      createCourseEntity(course, { idx, alreadyAdded: true })
+  updateSelectedCoursesListHelper(
+    gNestedSelectedCoursesAndGroups,
+    selectedCoursesList,
+    0
+  );
+  if (gFocusedGroupTextBox != null) {
+    // refocus on a group text box that was being typed in before update
+    gFocusedGroupTextBox.focus();
+    gFocusedGroupTextBox.setSelectionRange(
+      gFocusedGroupTextBoxSelection[0],
+      gFocusedGroupTextBoxSelection[1]
     );
   }
-  sortable(".sortable-list");
+}
+
+function updateSelectedCoursesListHelper(inputList, outputList, index) {
+  for (let idx = 0; idx < inputList.length; ++idx) {
+    const course = inputList[idx];
+    if (Array.isArray(course)) {
+      // means course is actually a group and should recurse accordingly
+      let courseBox = createCourseEntity(course[0], {
+        idx: index,
+        alreadyAdded: true
+      });
+      index++;
+      let groupList = courseBox.lastChild;
+      index = updateSelectedCoursesListHelper(course[1], groupList, index);
+      outputList.appendChild(courseBox);
+    } else {
+      outputList.appendChild(
+        createCourseEntity(course, { idx: index, alreadyAdded: true })
+      );
+      index++;
+    }
+  }
+  return index;
 }
 
 function updateSchedule() {
@@ -1396,6 +1620,35 @@ function minimizeArrowPointDown() {
   minimizeIcon.classList.add("ion-arrow-down-b");
 }
 
+//// Group functions
+
+function createGroup() {
+  let g = {
+    title: "Unnamed Group",
+    type: "group",
+    groupID: gGroupCounter,
+    minimized: false,
+    naming: true
+  };
+  gGroupCounter += 1;
+  gNestedSelectedCoursesAndGroups.push([g, []]);
+
+  // stop typing on currently open text box
+  // https://stackoverflow.com/a/51457710
+  if (gFocusedGroupTextBox != null) {
+    let e = new KeyBoardEvent("keydown", {
+      code: "Enter",
+      key: "Enter",
+      charKode: 13,
+      keyCode: 13,
+      view: window
+    });
+    gFocusedGroupTextBox.dispatchEvent(e);
+  }
+  gFocusedGroupTextBoxSelection = [0, 13]; // enough to highlight
+  handleSelectedCoursesUpdate();
+}
+
 /// Global state handling
 //// Combined update functions
 
@@ -1404,6 +1657,25 @@ function handleCourseSearchInputUpdate() {
 }
 
 function handleSelectedCoursesUpdate() {
+  // Update the derivative variable from main (gNestedSelectedCoursesAndGroups)
+  gSelectedCourses = gNestedSelectedCoursesAndGroups
+    .flatten(Infinity)
+    .filter(course => course.type !== "group");
+
+  // Reindex the course boxes to match any new ordering
+  indexSelectedCourses(selectedCoursesList.children, 0);
+
+  function indexSelectedCourses(lst, index) {
+    for (let entity of lst) {
+      entity.setAttribute("data-course-index", index);
+      index += 1;
+      if (entity.classList.contains("group")) {
+        index = indexSelectedCourses(entity.lastChild.children, index);
+      }
+    }
+    return index;
+  }
+
   // We need to add/remove the "+" buttons.
   rerenderCourseSearchResults();
 
@@ -1440,29 +1712,81 @@ function addCourse(course) {
   course = deepCopy(course);
   course.selected = true;
   course.starred = false;
-  gSelectedCourses.push(course);
+  gNestedSelectedCoursesAndGroups.push(course);
   handleSelectedCoursesUpdate();
 }
 
 function removeCourse(course) {
-  gSelectedCourses.splice(gSelectedCourses.indexOf(course), 1);
-  handleSelectedCoursesUpdate();
-}
+  removeCourseHelper(course, gNestedSelectedCoursesAndGroups);
 
-function readSelectedCoursesList() {
-  const newSelectedCourses = [];
-  for (let entity of selectedCoursesList.children) {
-    const idx = parseInt(entity.getAttribute("data-course-index"), 10);
-    if (!isNaN(idx) && idx >= 0 && idx < gSelectedCourses.length) {
-      newSelectedCourses.push(gSelectedCourses[idx]);
+  function removeCourseHelper(course, list) {
+    /*
+    finds index of matching course or group; if none found, return -1
+    */
+    function findIndex(list, course) {
+      for (let idx = 0; idx < list.length; idx++) {
+        if (course.courseCode === list[idx].courseCode) {
+          return idx;
+        } else if (course.groupID === list[idx].groupID) {
+          return idx;
+        }
+      }
+      return -1;
+    }
+
+    let idx;
+    if (course.type === "group") {
+      idx = list.findIndex(g => Array.isArray(g) && g[0] === course);
     } else {
-      alert("An internal error occurred. This is bad.");
-      updateSelectedCoursesList();
+      idx = list.indexOf(course);
+    }
+    if (idx !== -1) {
+      if (course.type === "group") {
+        list.splice(idx, 1, ...list[idx][1]);
+      } else {
+        list.splice(idx, 1);
+      }
+      handleSelectedCoursesUpdate();
       return;
+    } else {
+      let groups = list.filter(Array.isArray);
+      if (groups.length > 0) {
+        for (let group of groups) {
+          let groupList = group[1];
+          removeCourseHelper(course, groupList);
+        }
+      }
     }
   }
-  gSelectedCourses = newSelectedCourses;
+}
+
+/*
+update the array gNestedSelectedCoursesAndGroups based on what is in the
+DOM object selectedCoursesList
+*/
+function readSelectedCoursesList() {
+  gNestedSelectedCoursesAndGroups = readSelectedCoursesListHelper(
+    selectedCoursesList.children
+  );
   handleSelectedCoursesUpdate();
+
+  function readSelectedCoursesListHelper(lst) {
+    const newSelectedCourses = [];
+    for (let entity of lst) {
+      const idx = parseInt(entity.getAttribute("data-course-index"), 10);
+      const course = gNestedSelectedCoursesAndGroups.flatten(Infinity)[idx];
+      if (entity.classList.contains("group")) {
+        let temp = [];
+        if (entity.lastChild.hasChildNodes) {
+          temp = readSelectedCoursesListHelper(entity.lastChild.children);
+        }
+        newSelectedCourses.push([course, temp]);
+      } else {
+        newSelectedCourses.push(course);
+      }
+    }
+    return newSelectedCourses;
+  }
 }
 
 function saveImportExportModalChanges() {
@@ -1476,7 +1800,7 @@ function saveImportExportModalChanges() {
     alert("Malformed JSON. Refusing to save.");
     return;
   }
-  gSelectedCourses = upgradeSelectedCourses(obj);
+  gNestedSelectedCoursesAndGroups = upgradeSelectedCourses(obj);
   handleSelectedCoursesUpdate();
   $("#import-export-modal").modal("hide");
 }
@@ -1498,6 +1822,12 @@ function toggleStarredConflictingCourses() {
 }
 
 function toggleConflictCourses() {
+  updateCourseDisplays();
+  writeStateToLocalStorage();
+}
+
+function toggleGroupMinimized(group) {
+  group.minimized = !group.minimized;
   updateCourseDisplays();
   writeStateToLocalStorage();
 }
@@ -1615,6 +1945,10 @@ async function retrieveCourseData() {
   gApiData = apiData;
 
   if (wasUpdated) {
+    // necessary for Firefox to make refresh naming work
+    if (gFocusedGroupTextBox != null) {
+      gFocusedGroupTextBox.blur();
+    }
     updateCourseSearchResults();
     updateSelectedCoursesList();
     updateSchedule();
@@ -1644,6 +1978,10 @@ async function retrieveCourseDataUntilSuccessful() {
 function writeStateToLocalStorage() {
   localStorage.setItem("apiData", JSON.stringify(gApiData));
   localStorage.setItem("selectedCourses", JSON.stringify(gSelectedCourses));
+  localStorage.setItem(
+    "nestedSelectedCoursesAndGroups",
+    JSON.stringify(gNestedSelectedCoursesAndGroups)
+  );
   localStorage.setItem("scheduleTabSelected", gScheduleTabSelected);
   localStorage.setItem("showClosedCourses", gShowClosedCourses);
   localStorage.setItem("hideAllConflictingCourses", gHideAllConflictingCourses);
@@ -1725,6 +2063,9 @@ function readStateFromLocalStorage() {
   gApiData = readFromLocalStorage("apiData", _.isObject, null);
   gSelectedCourses = upgradeSelectedCourses(
     readFromLocalStorage("selectedCourses", _.isArray, [])
+  );
+  gNestedSelectedCoursesAndGroups = upgradeSelectedCourses(
+    readFromLocalStorage("nestedSelectedCoursesAndGroups", _.isArray, [])
   );
   gScheduleTabSelected = readFromLocalStorage(
     "scheduleTabSelected",

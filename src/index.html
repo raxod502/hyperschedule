@@ -343,7 +343,7 @@
         <button
           id="course-description-minimize"
           type="button"
-          class="btn btn-light"
+          class="btn btn-light btn-selected-course"
         >
           <i
             class="icon ion-arrow-down-b course-box-text"
@@ -353,6 +353,11 @@
       </div>
       <div id="course-description-box-outer">
         <div id="course-description-box"></div>
+      </div>
+      <div id="group-button-outer">
+        <button id="create-group-button" class="btn btn-primary" type="button">
+          Create Group
+        </button>
       </div>
       <div id="selected-courses-wrapper">
         <ul id="selected-courses-list" class="sortable-list courses-list"></ul>
@@ -578,7 +583,6 @@
         </div>
       </div>
     </div>
-
     <!-- curl -s <src> | shasum -a 384 | cut -f1 -d' ' | xxd -r -p | base64 | sed 's/.*/integrity="sha384-&"/' -->
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/babel-polyfill/6.26.0/polyfill.min.js"
@@ -591,10 +595,17 @@
       crossorigin="anonymous"
     ></script>
     <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.10.1/Sortable.min.js"
+      integrity="sha384-RpWEDcNK7eaFRQsp81Roobso/+naiL+84MyAxDAaqNCJAk6ug3B689zWj8eJXpvL"
+      crossorigin="anonymous"
+    ></script>
+    <!--
+    <script
       src="https://cdnjs.cloudflare.com/ajax/libs/html5sortable/0.6.3/html.sortable.min.js"
       integrity="sha384-McmwXqJoBon4wsJiVtB9S/zYH9D0Vt5lKjayJuj/6mlylXYopb3bKj4gXV1dbq2W"
       crossorigin="anonymous"
     ></script>
+  -->
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.3/umd/popper.min.js"
       integrity="sha384-vFJXuSJphROIrBnz7yo7oB41mKfc8JzQZiCq4NCceLEaO4IHwicKwpJf9c9IpFgh"

@@ -20,6 +20,15 @@
   cursor: auto;
 }
 
+.btn-selected-course {
+  font-size: 1rem;
+  line-height: 1em;
+  width: 100%;
+  padding: 0.25rem 0.5rem;
+  font-weight: bold;
+  font-size: 0.8rem;
+}
+
 .dropdown-menu {
   min-width: 0;
   padding: 2px 0;
@@ -151,15 +160,15 @@ body {
   flex-grow: 1;
 }
 
-#filter-button-wrapper {
+#filter--wrapper {
   margin-left: 1rem;
 }
 
-#filter-button {
+#filter- {
   margin: 0 auto;
 }
 
-#help-button {
+#help- {
   margin-left: 1rem;
 }
 
@@ -206,6 +215,32 @@ body {
   flex-direction: column;
 }
 
+#group-button-outer {
+  margin: 0rem 1rem 1rem;
+}
+
+#create-group-button {
+  float: right;
+  font-weight: normal;
+}
+
+.group-list {
+  list-style-type: none;
+  list-style-position: outside;
+  margin: 0.5rem 0 0 2rem;
+  padding-left: 0.25rem;
+  border-left: solid 2px #e3e6ea;
+}
+
+.group-box-content {
+  background-color: #f8f9fa;
+}
+
+.group-box-typing-box {
+  width: 100%;
+  border: 2px solid #bfdeff; /* darker option = #80BDFF*/
+}
+
 /*** Selected courses header bar ***/
 
 #selected-courses-bar {
@@ -215,7 +250,7 @@ body {
   flex-grow: 1;
 }
 
-#import-export-data-button {
+#import-export-data- {
 }
 
 #print-dropdown-wrapper {
@@ -234,11 +269,11 @@ body {
   background-color: #e9ecef;
 }
 
-#settings-button-wrapper {
+#settings--wrapper {
   margin-left: 0.5rem;
 }
 
-#settings-button {
+#settings- {
   margin-right: 3px;
   background-color: transparent;
   color: #007bff;
@@ -247,7 +282,7 @@ body {
   padding: 0px 2px;
 }
 
-#settings-button:hover {
+#settings-:hover {
   color: #0069d9;
 }
 
@@ -261,13 +296,6 @@ body {
   flex-shrink: 0;
 }
 
-#course-description-minimize {
-  font-size: 1rem;
-  line-height: 1em;
-  width: 100%;
-  padding: 0.25rem 0.5rem;
-}
-
 #selected-courses-wrapper {
   overflow-y: auto;
 }
@@ -278,8 +306,6 @@ body {
   height: 0px;
   flex-shrink: 0;
   text-align: center;
-  /*margin-top: 10px;
-    margin-bottom: 5px;*/
   overflow: hidden;
   transition: height 0.2s, border 0.2s;
   margin: 0 1rem 1rem 1rem;
@@ -513,7 +539,7 @@ body {
   padding: 0.25rem 0.5rem;
 }
 
-.course-box-text .course-box-course-code {
+.course-box-course-code {
   font-weight: bold;
 }
 
@@ -573,6 +599,21 @@ body {
 
 #selected-courses-column .course-box-star-icon {
   font-size: 1rem;
+  cursor: pointer;
+}
+
+#selected-courses-column .course-box-minimize-toggle {
+  display: none;
+}
+
+#selected-courses-column .course-box-minimize-label {
+  margin: 0;
+  padding: 0.25rem 0.25rem 0.25rem 0.5rem;
+  line-height: 1em;
+}
+
+#selected-courses-column .course-box-minimize-icon {
+  font-size: 1.1rem;
   cursor: pointer;
 }
 
