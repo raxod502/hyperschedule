@@ -4,6 +4,9 @@
 // M-x occur with the following query: ^\(///+\|const\|\(async \)?function\|let\)
 
 /// Globals
+//// CSS Stylesheets
+const mainSheetRules = document.styleSheets[3].cssRules;
+
 //// Modules
 
 const ics = require("/js/vendor/ics-0.2.0.min.js");
@@ -27,12 +30,24 @@ const filterKeywords = {
   "days:": ["days:", "day:"]
 };
 
-filterInequalities = ["<=", ">=", "<", ">", "="];
+const filterInequalities = ["<=", ">=", "<", ">", "="];
 
 //// DOM elements
 
 const courseSearchToggle = document.getElementById("course-search-toggle");
 const scheduleToggle = document.getElementById("schedule-toggle");
+const scheduleDropDownContent = document.getElementById(
+  "schedule-dropdown-content"
+);
+const scheduleDropdownAdd = document.getElementById(
+  "schedule-dropdown-add-wrapper"
+);
+const scheduleDropDownButton = document.getElementById(
+  "schedule-dropdown-toggle-btn"
+);
+
+const scheduleLabels = document.getElementsByClassName("schedule-label");
+const scheduleElements = document.getElementsByClassName("schedule-element");
 
 const closedCoursesToggle = document.getElementById("closed-courses-toggle");
 const hideAllConflictingCoursesToggle = document.getElementById(
@@ -108,6 +123,17 @@ const importExportCopyButton = document.getElementById(
 
 // Persistent data.
 let gApiData = null;
+// [Schedule name, Unique schedule ID]
+let gScheduleList = [
+  { name: "Schedule (default)", id: "schedule-1", color: "#007bff" }
+];
+let gLastScheduleSelected = {
+  name: "Schedule (default)",
+  id: "schedule-1",
+  color: "#007bff"
+};
+let gLastScheduleId = 1;
+let gSchedulesChecked = [gLastScheduleSelected.id];
 let gSelectedCourses = [];
 let gScheduleTabSelected = false;
 let gShowClosedCourses = true;
@@ -337,7 +363,7 @@ function removeEntityChildren(entity) {
 ///// Course property queries
 
 function isCourseClosed(course) {
-  return course.courseEnrollmentStatus == "closed";
+  return course.courseEnrollmentStatus === "closed";
 }
 
 function courseToString(course) {
@@ -500,13 +526,53 @@ function getCourseColor(course, format = "hex") {
   return getRandomColor(hue, seed, format);
 }
 
-function getRandomColor(hue, seed, format = "hex") {
+function getRandomColor(hue, seed, format = "hex", luminosity = "light") {
   return randomColor({
     hue: hue,
-    luminosity: "light",
+    luminosity: luminosity,
     seed: seed,
     format
   });
+}
+
+// lighten/darken hex shades
+// https://stackoverflow.com/questions/5560248/programmatically-lighten-or-darken-a-hex-color-or-rgb-and-blend-colors
+function shadeColor(color, percent) {
+  let R = parseInt(color.substring(1, 3), 16);
+  let G = parseInt(color.substring(3, 5), 16);
+  let B = parseInt(color.substring(5, 7), 16);
+
+  R = parseInt((R * (100 + percent)) / 100);
+  G = parseInt((G * (100 + percent)) / 100);
+  B = parseInt((B * (100 + percent)) / 100);
+
+  R = R < 255 ? R : 255;
+  G = G < 255 ? G : 255;
+  B = B < 255 ? B : 255;
+
+  let RR = R.toString(16).length === 1 ? "0" + R.toString(16) : R.toString(16);
+  let GG = G.toString(16).length === 1 ? "0" + G.toString(16) : G.toString(16);
+  let BB = B.toString(16).length === 1 ? "0" + B.toString(16) : B.toString(16);
+
+  return "#" + RR + GG + BB;
+}
+
+// https://stackoverflow.com/questions/13712697/set-background-color-in-hex
+function rgbToHex(col) {
+  if (col.charAt(0) === "r") {
+    col = col
+      .replace("rgb(", "")
+      .replace(")", "")
+      .split(",");
+    let r = parseInt(col[0], 10).toString(16);
+    let g = parseInt(col[1], 10).toString(16);
+    let b = parseInt(col[2], 10).toString(16);
+    r = r.length === 1 ? "0" + r : r;
+    g = g.length === 1 ? "0" + g : g;
+    b = b.length === 1 ? "0" + b : b;
+    let colHex = "#" + r + g + b;
+    return colHex;
+  }
 }
 
 ///// Course search
@@ -600,13 +666,13 @@ function coursePassesDayFilter(course, inputString) {
       const difference2 = new Set(
         [...inputDays].filter(x => !courseDays.has(x))
       );
-      return difference1.size == 0 && difference2.size == 0;
+      return difference1.size === 0 && difference2.size === 0;
     case "<":
       // courseDays is a proper subset of inputDays
-      return courseDays.subSet(inputDays) && inputDays.size != courseDays.size;
+      return courseDays.subSet(inputDays) && inputDays.size !== courseDays.size;
     case ">":
       // inputDays is a proper subset of courseDays
-      return inputDays.subSet(courseDays) && inputDays.size != courseDays.size;
+      return inputDays.subSet(courseDays) && inputDays.size !== courseDays.size;
     default:
       return false;
   }
@@ -788,10 +854,10 @@ function computeCreditCountDescription(schedule) {
 
 //// Global state queries
 
-function courseAlreadyAdded(course) {
+function courseAlreadyAdded(course, selectedCoursesList) {
   return _.some(selectedCourse => {
     return selectedCourse.courseCode === course.courseCode;
-  }, gSelectedCourses);
+  }, selectedCoursesList);
 }
 
 /// API retrieval
@@ -818,6 +884,18 @@ function attachListeners() {
 
   courseSearchToggle.addEventListener("click", displayCourseSearchColumn);
   scheduleToggle.addEventListener("click", displayScheduleColumn);
+  scheduleDropdownAdd.addEventListener("click", addNewSchedule);
+
+  for (const sched of scheduleElements) {
+    sched.addEventListener("click", selectSchedule);
+    sched.addEventListener("click", catchEvent);
+  }
+
+  for (const label of scheduleLabels) {
+    label.addEventListener("change", toggleScheduleChecked);
+    label.addEventListener("change", catchEvent);
+  }
+
   closedCoursesToggle.addEventListener("click", toggleClosedCourses);
   hideAllConflictingCoursesToggle.addEventListener(
     "click",
@@ -1176,12 +1254,25 @@ function getSearchTextFilters(filtersTextArray) {
 //// DOM updates
 ///// DOM updates due to global state change
 
+function updateScheduleMenu() {
+  for (const sched of gScheduleList) {
+    appendScheduleRow(sched);
+  }
+}
+
 function updateTabToggle() {
   setEntityVisibility(scheduleColumn, gScheduleTabSelected);
   setButtonSelected(scheduleToggle, gScheduleTabSelected);
 
   setEntityVisibility(courseSearchColumn, !gScheduleTabSelected);
   setButtonSelected(courseSearchToggle, !gScheduleTabSelected);
+
+  // Necessary for overwriting boostrap colors
+  if (gScheduleTabSelected && gLastScheduleSelected.id !== "schedule-1") {
+    scheduleToggle.classList.add("change-tab-color");
+  } else {
+    scheduleToggle.classList.remove("change-tab-color");
+  }
 }
 
 function updateShowClosedCoursesCheckbox() {
@@ -1269,7 +1360,7 @@ function rerenderCourseSearchResults() {
     ++index
   ) {
     const course = gApiData.data.courses[gFilteredCourseKeys[index]];
-    const alreadyAdded = courseAlreadyAdded(course);
+    const alreadyAdded = courseAlreadyAdded(course, gSelectedCourses);
     const entity = createCourseEntity(course, { alreadyAdded });
     entity.style.top = "" + gCourseEntityHeight * index + "px";
     courseSearchResultsList.appendChild(entity);
@@ -1423,10 +1514,12 @@ function handleGlobalStateUpdate() {
   updateShowClosedCoursesCheckbox();
   updateShowConflictingCoursesCheckbox();
   updateConflictCoursesRadio();
+  updateScheduleMenu();
+  updateScheduleTabTitle();
+  updateScheduleColor();
 
   // Update course displays.
   updateCourseDisplays();
-
   // Canonicalize the state of local storage.
   writeStateToLocalStorage();
 }
@@ -1434,14 +1527,249 @@ function handleGlobalStateUpdate() {
 //// Global state mutation
 
 function addCourse(course) {
-  if (courseAlreadyAdded(course)) {
+  if (courseAlreadyAdded(course, gSelectedCourses)) {
     return;
   }
   course = deepCopy(course);
   course.selected = true;
   course.starred = false;
   gSelectedCourses.push(course);
+  addToSchedules(course);
   handleSelectedCoursesUpdate();
+}
+
+function addToSchedules(course) {
+  for (const schedule of gSchedulesChecked) {
+    if (schedule !== gLastScheduleSelected.id) {
+      let oldSchedule = readFromLocalStorage(
+        `selectedCourses-${schedule}`,
+        _.isArray,
+        []
+      );
+      if (!courseAlreadyAdded(course, oldSchedule)) {
+        oldSchedule.push(course);
+        localStorage.setItem(
+          `selectedCourses-${schedule}`,
+          JSON.stringify(oldSchedule)
+        );
+      }
+    }
+  }
+}
+
+function addNewSchedule() {
+  // Adds a new schedule to the dropdown list.
+
+  const inputName = promptName();
+  // User pressed cancel
+  if (inputName === undefined) {
+    return;
+  }
+
+  // update global var
+  gLastScheduleId++;
+  newId = `schedule-${gLastScheduleId}`;
+  const defaultPair = {
+    name: inputName,
+    id: newId,
+    color: getRandomColor(
+      "random",
+      CryptoJS.MD5(inputName + newId).toString(),
+      "hex",
+      "light"
+    )
+  };
+  gScheduleList.push(defaultPair);
+
+  // handle new DOM elements
+  appendScheduleRow(defaultPair);
+  catchEvent(event);
+
+  // Update state
+  writeStateToLocalStorage();
+}
+
+function promptName() {
+  let name = "";
+
+  while (true) {
+    name = prompt("Please enter a name for this schedule.");
+
+    if (name === null) {
+      return;
+    } else if (name === "") {
+      alert("Please enter a non-empty name.");
+    } else if (name.length > 20) {
+      alert("Please enter a name with 20 characters or less.");
+    } else {
+      break;
+    }
+  }
+  return name;
+}
+
+function appendScheduleRow(schedule) {
+  const scheduleName = schedule.name;
+  const scheduleId = schedule.id;
+  const scheduleColor = schedule.color;
+
+  let newSched = document.createElement("div");
+  let newName = document.createTextNode(scheduleName);
+  let checkLabel = document.createElement("label");
+  let checkIcon = document.createElement("i");
+  let checkBox = document.createElement("input");
+  let deleteButton = document.createElement("i");
+  let editButton = document.createElement("i");
+  let checkEditWrapper = document.createElement("div");
+
+  checkLabel.id = `schedule-${scheduleId}-checkbox`;
+  checkLabel.classList.add("schedule-label");
+  checkLabel.addEventListener("change", toggleScheduleChecked);
+  checkLabel.addEventListener("change", catchEvent);
+
+  checkIcon.classList.add("schedule-icon");
+  checkIcon.classList.add("icon");
+  checkIcon.classList.add("ion-android-checkbox-outline-blank");
+
+  checkBox.type = "checkbox";
+  checkBox.classList.add("schedule-checkbox");
+
+  checkLabel.appendChild(checkBox);
+  checkLabel.appendChild(checkIcon);
+
+  deleteButton.classList.add("icon");
+  deleteButton.classList.add("ion-close");
+  deleteButton.classList.add("schedule-delete-button");
+  deleteButton.addEventListener("click", removeSchedule);
+  deleteButton.addEventListener("click", catchEvent);
+
+  editButton.classList.add("icon");
+  editButton.classList.add("ion-edit");
+  editButton.classList.add("schedule-edit-button");
+  editButton.addEventListener("click", editName);
+  editButton.addEventListener("click", catchEvent);
+
+  checkEditWrapper.classList.add("schedule-checkbox-edit-wrapper");
+  checkEditWrapper.appendChild(checkLabel);
+  if (scheduleId !== "schedule-1") checkEditWrapper.appendChild(editButton);
+
+  newSched.classList.add("schedule-element");
+  newSched.classList.add("btn");
+  newSched.id = scheduleId;
+  newSched.appendChild(checkEditWrapper);
+  newSched.appendChild(newName);
+
+  // Add placeholder for delete so that schedule 1 lines up properly.
+  let fakeDelete = document.createElement("div");
+  fakeDelete.classList.add("schedule-delete-placeholder");
+  fakeDelete.classList.add("icon");
+  fakeDelete.classList.add("ion-close");
+
+  if (scheduleId !== "schedule-1") newSched.appendChild(deleteButton);
+  else newSched.appendChild(fakeDelete);
+
+  newSched.addEventListener("click", selectSchedule);
+  newSched.addEventListener("click", catchEvent);
+
+  if (scheduleId !== "schedule-1") {
+    newSched.style.backgroundColor = scheduleColor;
+  } else {
+    newSched.classList.add("btn-primary");
+  }
+
+  scheduleDropDownContent.appendChild(newSched);
+
+  if (scheduleId === gLastScheduleSelected.id) {
+    // highlight
+    newSched.classList.add("schedule-active");
+    newSched.classList.remove("schedule-inactive");
+    // check
+    checkIcon.classList.remove("ion-android-checkbox-outline-blank");
+    checkIcon.classList.add("ion-android-checkbox");
+  }
+}
+
+function removeSchedule() {
+  const id = event.target.parentNode.id;
+
+  // remove from global var
+  for (const sched of gScheduleList) {
+    if (sched.id === id) {
+      gScheduleList.splice(gScheduleList.indexOf(sched), 1);
+      gSchedulesChecked.splice(gSchedulesChecked.indexOf(sched.id), 1);
+    }
+  }
+  // remove from UI
+  const row = event.target.parentNode;
+  row.parentNode.removeChild(row);
+
+  catchEvent(event);
+
+  // case where removing current schedule
+  // change current schedule to default schedule
+  if (id === gLastScheduleSelected.id) {
+    handleCurrentScheduleRemoval();
+  }
+
+  writeStateToLocalStorage();
+}
+
+function handleCurrentScheduleRemoval() {
+  const defaultRow = document.getElementById("schedule-1");
+  // update global var
+  gLastScheduleSelected = {
+    name: "Schedule (default)",
+    id: "schedule-1",
+    color: "#007bff"
+  };
+  gSelectedCourses = upgradeSelectedCourses(
+    readFromLocalStorage(
+      `selectedCourses-${gLastScheduleSelected.id}`,
+      _.isArray,
+      []
+    )
+  );
+  // highlight
+  defaultRow.classList.add("schedule-active");
+  defaultRow.classList.remove("schedule-inactive");
+  // check
+  if (!gSchedulesChecked.includes(gLastScheduleSelected.id)) {
+    gSchedulesChecked.push(gLastScheduleSelected.id);
+    const checkBox = defaultRow.children[0].children[0].children[1];
+    checkBox.classList.remove("ion-android-checkbox-outline-blank");
+    checkBox.classList.add("ion-android-checkbox");
+  }
+  updateScheduleColor();
+  updateCourseDisplays();
+  updateScheduleTabTitle();
+}
+
+function editName() {
+  const id = event.target.parentNode.parentNode.id;
+  const inputName = promptName();
+  // User pressed cancel
+  if (inputName === undefined) {
+    return;
+  }
+  // change global var
+  for (const sched of gScheduleList) {
+    if (sched.id === id) {
+      sched.name = inputName;
+    }
+  }
+  if (gLastScheduleSelected.id === id) {
+    gLastScheduleSelected.name = inputName;
+  }
+  // change UI
+  const oldName = event.target.parentNode.parentNode.childNodes[1];
+  oldName.nodeValue = inputName;
+
+  // update schedule tab to reflect name change
+  updateScheduleTabTitle();
+
+  catchEvent(event);
+
+  writeStateToLocalStorage();
 }
 
 function removeCourse(course) {
@@ -1512,6 +1840,186 @@ function toggleCourseStarred(course) {
   course.starred = !course.starred;
   updateCourseDisplays();
   writeStateToLocalStorage();
+}
+
+function toggleScheduleChecked() {
+  if (event.target.className === "schedule-checkbox") {
+    const parent = event.target.parentNode;
+    const checkArr = parent.children;
+    const schedId = event.target.parentNode.parentNode.parentNode.id;
+
+    // cannot uncheck currently selected schedule
+    if (schedId !== gLastScheduleSelected.id) {
+      if (checkArr[1].classList.contains("ion-android-checkbox")) {
+        // One schedule must be checked
+        const numChecked = gSchedulesChecked.length;
+        if (numChecked > 1) {
+          gSchedulesChecked.splice(gSchedulesChecked.indexOf(schedId), 1);
+          // Uncheck schedule in UI
+          checkArr[1].classList.remove("ion-android-checkbox");
+          checkArr[1].classList.add("ion-android-checkbox-outline-blank");
+        } else {
+          checkArr[0].checked = true;
+        }
+      } else {
+        gSchedulesChecked.push(schedId);
+        // Check off schedule in UI
+        checkArr[1].classList.remove("ion-android-checkbox-outline-blank");
+        checkArr[1].classList.add("ion-android-checkbox");
+      }
+    }
+  }
+}
+
+function selectSchedule() {
+  if (
+    event.target.className === "schedule-element btn schedule-active" ||
+    event.target.className === "schedule-element btn schedule-inactive" ||
+    event.target.className ===
+      "schedule-element btn btn-primary schedule-active" ||
+    event.target.className ===
+      "schedule-element btn btn-primary schedule-inactive" ||
+    event.target.className === "schedule-element btn" ||
+    event.target.className === "schedule-element btn btn-primary"
+  ) {
+    // Switch current schedule
+    const newName = event.target.textContent;
+    const newId = event.target.id;
+    let newColor = event.target.style.backgroundColor;
+
+    // default clicked
+    if (newColor === "") {
+      gLastScheduleSelected = { name: newName, id: newId, color: "#007bff" };
+    } else {
+      newColor = rgbToHex(newColor);
+      gLastScheduleSelected = { name: newName, id: newId, color: newColor };
+    }
+    gSelectedCourses = upgradeSelectedCourses(
+      readFromLocalStorage(
+        `selectedCourses-${gLastScheduleSelected.id}`,
+        _.isArray,
+        []
+      )
+    );
+
+    highlightSchedule(event);
+    updateScheduleTabDisplay(event);
+    defaultCheckSchedule(event);
+
+    updateCourseDisplays();
+    updateScheduleTabTitle();
+    writeStateToLocalStorage();
+  }
+}
+
+function updateScheduleTabDisplay(event) {
+  let newColor = event.target.style.backgroundColor;
+  // default clicked
+  if (newColor === "") {
+    newColor = "#007bff";
+  }
+  // Attach CSS classess for overriding Bootstrap colors
+  if (!scheduleDropDownButton.classList.contains("change-dropdown-color")) {
+    scheduleDropDownButton.classList.add("change-dropdown-color");
+  }
+  if (
+    !scheduleToggle.classList.contains("change-tab-color") &&
+    gScheduleTabSelected
+  ) {
+    scheduleToggle.classList.add("change-tab-color");
+  }
+  if (newColor.charAt(0) !== "#") newColor = rgbToHex(newColor);
+  const hoverColor = shadeColor(newColor, -3);
+  changeCSSColors(mainSheetRules, newColor, hoverColor);
+}
+
+function changeCSSColors(rules, newColor, hoverColor) {
+  // Find CSS rules and override with inputted color
+  for (const rule of rules) {
+    if (rule.selectorText === ".change-dropdown-color") {
+      rule.style.setProperty("border-color", newColor, "important");
+      rule.style.setProperty("color", newColor, "important");
+    } else if (rule.selectorText === ".change-tab-color") {
+      rule.style.setProperty("background-color", newColor, "important");
+      if (newColor === "#007bff")
+        rule.style.setProperty("color", "white", "important");
+      else rule.style.setProperty("color", "black", "important");
+    } else if (
+      rule.selectorText ===
+      ".change-dropdown-color:hover, .change-dropdown-color:focus, .change-dropdown-color:active, .change-dropdown-color.active, .open > .dropdown-toggle.change-dropdown-color .show > .dropdown-toggle.change-dropdown-color"
+    ) {
+      rule.style.setProperty("background-color", newColor, "important");
+      rule.style.setProperty("border-color", newColor, "important");
+      rule.style.setProperty("color", "white", "important");
+      rule.style.setProperty("box-shadow", "none", "important");
+      rule.style.setProperty("outline", "none", "important");
+    } else if (
+      rule.selectorText ===
+      ".change-tab-color:hover, .change-tab-color:focus, .change-tab-color:active, .change-tab-color.active, .open > .dropdown-toggle.change-tab-color"
+    ) {
+      rule.style.setProperty("background-color", hoverColor, "important");
+      rule.style.setProperty("box-shadow", "none", "important");
+      if (newColor === "#007bff")
+        rule.style.setProperty("color", "white", "important");
+      else rule.style.setProperty("color", "black", "important");
+    }
+  }
+}
+
+function highlightSchedule(event) {
+  // multischedules- highlights one schedule in the dropdown
+  const schedActive = "schedule-active";
+  const schedInactive = "schedule-inactive";
+  if (
+    !event.target.classList.contains(schedActive) &&
+    !event.target.classList.contains("schedule-checkbox")
+  ) {
+    // if schedule isn't already active
+
+    // UI activate
+    event.target.classList.add(schedActive);
+    event.target.classList.remove(schedInactive);
+  }
+  // loop through remaining schedules and un-select them
+  for (sched of scheduleElements) {
+    if (sched.id != event.target.id) {
+      // UI de-activate
+      sched.classList.remove(schedActive);
+      sched.classList.add(schedInactive);
+    }
+  }
+}
+
+function defaultCheckSchedule(event) {
+  // every time user switches to a different schedule, current schedule should be checked
+  // Only check schedule when user clicked on schedule button (and not checkbox)
+  if (
+    event.target.className === "schedule-element btn schedule-active" ||
+    event.target.className === "schedule-element btn schedule-inactive" ||
+    event.target.className ===
+      "schedule-element btn btn-primary schedule-active" ||
+    event.target.className ===
+      "schedule-element btn btn-primary schedule-inactive" ||
+    event.target.className === "schedule-element btn"
+  ) {
+    // Only check if not already checked
+    if (!gSchedulesChecked.includes(gLastScheduleSelected.id)) {
+      gSchedulesChecked.push(gLastScheduleSelected.id);
+      const checkBox = event.target.children[0].children[0].children[1];
+      checkBox.classList.remove("ion-android-checkbox-outline-blank");
+      checkBox.classList.add("ion-android-checkbox");
+    }
+  }
+}
+
+function updateScheduleTabTitle() {
+  scheduleToggle.textContent = gLastScheduleSelected.name;
+}
+
+function updateScheduleColor() {
+  const newColor = gLastScheduleSelected.color;
+  const hoverColor = shadeColor(newColor, -3);
+  changeCSSColors(mainSheetRules, newColor, hoverColor);
 }
 
 function updateCourseDisplays() {
@@ -1643,7 +2151,20 @@ async function retrieveCourseDataUntilSuccessful() {
 
 function writeStateToLocalStorage() {
   localStorage.setItem("apiData", JSON.stringify(gApiData));
-  localStorage.setItem("selectedCourses", JSON.stringify(gSelectedCourses));
+  localStorage.setItem("scheduleList", JSON.stringify(gScheduleList));
+  localStorage.setItem(
+    "lastScheduleSelected",
+    JSON.stringify(gLastScheduleSelected)
+  );
+  localStorage.setItem("lastScheduleId", gLastScheduleId);
+  localStorage.setItem(
+    "schedulesChecked",
+    JSON.stringify([gLastScheduleSelected.id])
+  );
+  localStorage.setItem(
+    `selectedCourses-${gLastScheduleSelected.id}`,
+    JSON.stringify(gSelectedCourses)
+  );
   localStorage.setItem("scheduleTabSelected", gScheduleTabSelected);
   localStorage.setItem("showClosedCourses", gShowClosedCourses);
   localStorage.setItem("hideAllConflictingCourses", gHideAllConflictingCourses);
@@ -1723,8 +2244,24 @@ function upgradeSelectedCourses(selectedCourses) {
 
 function readStateFromLocalStorage() {
   gApiData = readFromLocalStorage("apiData", _.isObject, null);
+  gScheduleList = readFromLocalStorage("scheduleList", _.isArray, [
+    { name: "Schedule (default)", id: "schedule-1", color: "#007bff" }
+  ]);
+  gLastScheduleSelected = readFromLocalStorage(
+    "lastScheduleSelected",
+    _.isObject,
+    { name: "Schedule (default)", id: "schedule-1", color: "#007bff" }
+  );
+  gLastScheduleId = readFromLocalStorage("lastScheduleId", _.isNumber, 1);
+  gSchedulesChecked = readFromLocalStorage("schedulesChecked", _.isArray, [
+    gLastScheduleSelected.id
+  ]);
   gSelectedCourses = upgradeSelectedCourses(
-    readFromLocalStorage("selectedCourses", _.isArray, [])
+    readFromLocalStorage(
+      `selectedCourses-${gLastScheduleSelected.id}`,
+      _.isArray,
+      []
+    )
   );
   gScheduleTabSelected = readFromLocalStorage(
     "scheduleTabSelected",
@@ -2084,7 +2621,6 @@ handleGlobalStateUpdate();
 retrieveCourseDataUntilSuccessful();
 
 /// Closing remarks
-
 // Local Variables:
 // outline-regexp: "///+"
 // End:
