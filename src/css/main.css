@@ -222,7 +222,7 @@ body {
   margin-left: 1rem;
 }
 
-.print-btn {
+.dropdown-btn {
   white-space: nowrap;
   padding: 3px 8px;
   min-width: 0;
@@ -230,8 +230,12 @@ body {
   background-color: white;
 }
 
-.print-btn:hover {
+.dropdown-btn:hover {
   background-color: #e9ecef;
+}
+
+#user-wrapper {
+  margin-left: 1rem;
 }
 
 #settings-button-wrapper {
@@ -608,6 +612,15 @@ body {
 
 #import-export-copy-button.copy-button-error::after {
   content: "Couldn't copy";
+}
+
+#user-button-icon {
+  max-width: 2.4em;
+}
+
+#user-dropdown {
+  border: 0;
+  padding: 0 0.4rem 0 0;
 }
 
 /* Local Variables:           */
