@@ -58,8 +58,9 @@ const greyConflictCoursesOptions = ["none", "starred", "all"];
 
 const filterKeywords: Record<string, string[]> = {
   "dept:": ["dept:", "department:"],
-  "college:": ["college", "col:", "school:", "sch:"],
-  "days:": ["days:", "day:"]
+  "college:": ["college:", "col:", "school:", "sch:"],
+  "days:": ["days:", "day:"],
+  "credits:": ["credits:", "credit:"]
 };
 
 const filterInequalities = ["<=", ">=", "<", ">", "="];
@@ -514,12 +515,15 @@ function coursePassesTextFilters(
   const lowerCourseCode = course.courseCode.toLowerCase();
   const dept = lowerCourseCode.split(" ")[0];
   const col = lowerCourseCode.split(" ")[2].split("-")[0];
+  const credits = parseFloat(course.courseCredits);
 
   if (
     (textFilters["dept:"] && !dept.match(textFilters["dept:"])) ||
     (textFilters["college:"] && !col.match(textFilters["college:"])) ||
     (textFilters["days:"] &&
-      !coursePassesDayFilter(course, textFilters["days:"]))
+      !coursePassesDayFilter(course, textFilters["days:"])) ||
+    (textFilters["credits:"] &&
+      !coursePassesCreditFilter(credits, textFilters["credits:"]))
   ) {
     return false;
   }
@@ -527,9 +531,9 @@ function coursePassesTextFilters(
   return true;
 }
 
-function parseDaysInequality(inputDays: string) {
-  for (const rel of filterInequalities)
-    if (inputDays.startsWith(rel)) return rel;
+///// Course scheduling
+function parseInequality(input: string) {
+  for (const rel of filterInequalities) if (input.startsWith(rel)) return rel;
   return "";
 }
 
@@ -554,7 +558,7 @@ function generateInputDays(input: string) {
 
 function coursePassesDayFilter(course: Course.CourseV3, inputString: string) {
   const courseDays = generateDayFilter(course);
-  const rel = parseDaysInequality(inputString);
+  const rel = parseInequality(inputString);
   const inputDays = generateInputDays(
     inputString.substring(rel.length).toLowerCase()
   );
@@ -595,6 +599,48 @@ function setSubset<T>(a: Set<T>, b: Set<T>) {
   if (a.size > b.size) return false;
   for (const elem of a) if (!b.has(elem)) return false;
   return true;
+}
+
+function parseCreditFloats(rel: string, input: string) {
+  const credits = input.split("-");
+  // Single credit entered
+  if (credits.length === 1) {
+    return [parseFloat(input.substring(rel.length))];
+  }
+  // Credit range entered
+  return [parseFloat(credits[0]), parseFloat(credits[1])];
+}
+
+function coursePassesCreditFilter(courseCredits: number, inputString: string) {
+  const rel = parseInequality(inputString);
+  const inputCredits = parseCreditFloats(rel, inputString);
+
+  // Credit range
+  if (inputCredits.length === 2) {
+    return inputCredits[0] <= courseCredits && inputCredits[1] >= courseCredits;
+  } else if (inputCredits.length === 1) {
+    // Single value
+    // No inequality
+    if (!rel || isNaN(+inputString.substring(0, 1))) {
+      return inputCredits[0] === courseCredits;
+    }
+
+    switch (rel) {
+      case "<=":
+        return courseCredits <= inputCredits[0];
+      case ">=":
+        return courseCredits >= inputCredits[0];
+      case "=":
+        return courseCredits === inputCredits[0];
+      case "<":
+        return courseCredits < inputCredits[0];
+      case ">":
+        return courseCredits > inputCredits[0];
+      default:
+        return false;
+    }
+  }
+  return false;
 }
 
 ///// Course scheduling
