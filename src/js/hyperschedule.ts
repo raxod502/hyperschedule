@@ -27,6 +27,7 @@ import * as Schedule from "./schedule";
 import * as Util from "./util";
 import * as TimeString from "./time-string";
 import * as Pdf from "./pdf";
+import * as Filter from "./filter";
 
 import * as _ from "lodash/fp";
 
@@ -56,13 +57,6 @@ const apiURL = process.env.API_URL || "https://hyperschedule.herokuapp.com";
 
 const greyConflictCoursesOptions = ["none", "starred", "all"];
 
-const filterKeywords: Record<string, string[]> = {
-  "dept:": ["dept:", "department:"],
-  "college:": ["college", "col:", "school:", "sch:"],
-  "days:": ["days:", "day:"]
-};
-
-const filterInequalities = ["<=", ">=", "<", ">", "="];
 const pacificScheduleDays = [
   "Sunday",
   "Monday",
@@ -209,11 +203,6 @@ let gCourseSelected: Course.CourseV3 | null = null;
 function parseDate(dateStr: string) {
   const [year, month, day] = dateStr.split("-");
   return new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
-}
-
-// https://stackoverflow.com/a/2593661
-function quoteRegexp(str: string) {
-  return (str + "").replace(/[.?*+^$[\]\\(){}|-]/g, "\\$&");
 }
 
 // https://stackoverflow.com/a/29018745/3538165
@@ -476,127 +465,6 @@ function removeEntityChildren(entity: HTMLElement) {
   }
 }
 
-//// Course and schedule utility functions
-///// Course property queries
-
-///// Course search
-
-function courseMatchesSearchQuery(course: Course.CourseV3, query: RegExp[]) {
-  for (let subquery of query) {
-    if (
-      course.courseCode.match(subquery) ||
-      course.courseCode.replace(/ /g, "").match(subquery) ||
-      course.courseName.match(subquery)
-    ) {
-      continue;
-    }
-    let foundMatch = false;
-    if (course.courseInstructors !== null) {
-      for (let instructor of course.courseInstructors) {
-        if (instructor.match(subquery)) {
-          foundMatch = true;
-          break;
-        }
-      }
-    }
-    if (foundMatch) {
-      continue;
-    }
-    return false;
-  }
-  return true;
-}
-
-function coursePassesTextFilters(
-  course: Course.CourseV3,
-  textFilters: Record<string, string>
-) {
-  const lowerCourseCode = course.courseCode.toLowerCase();
-  const dept = lowerCourseCode.split(" ")[0];
-  const col = lowerCourseCode.split(" ")[2].split("-")[0];
-
-  if (
-    (textFilters["dept:"] && !dept.match(textFilters["dept:"])) ||
-    (textFilters["college:"] && !col.match(textFilters["college:"])) ||
-    (textFilters["days:"] &&
-      !coursePassesDayFilter(course, textFilters["days:"]))
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function parseDaysInequality(inputDays: string) {
-  for (const rel of filterInequalities)
-    if (inputDays.startsWith(rel)) return rel;
-  return "";
-}
-
-function generateDayFilter(course: Course.CourseV3) {
-  const scheduleList = course.courseSchedule;
-  let days = new Set();
-
-  for (let schedule of scheduleList) {
-    const str1 = schedule.scheduleDays.toLowerCase();
-    const arr1 = [...str1];
-    arr1.forEach(days.add, days);
-  }
-  return days;
-}
-
-function generateInputDays(input: string) {
-  let days = new Set();
-  const arr1 = [...input];
-  arr1.forEach(days.add, days);
-  return days;
-}
-
-function coursePassesDayFilter(course: Course.CourseV3, inputString: string) {
-  const courseDays = generateDayFilter(course);
-  const rel = parseDaysInequality(inputString);
-  const inputDays = generateInputDays(
-    inputString.substring(rel.length).toLowerCase()
-  );
-
-  switch (rel) {
-    case "<=":
-      // courseDays is a subset of inputDays
-      return setSubset(courseDays, inputDays);
-    case "":
-    case ">=":
-      // inputDays is a subset of courseDays
-      return setSubset(inputDays, courseDays);
-    case "=":
-      // inputDays match exactly courseDays
-      const difference1 = new Set(
-        [...courseDays].filter(x => !inputDays.has(x))
-      );
-      const difference2 = new Set(
-        [...inputDays].filter(x => !courseDays.has(x))
-      );
-      return difference1.size == 0 && difference2.size == 0;
-    case "<":
-      // courseDays is a proper subset of inputDays
-      return (
-        setSubset(courseDays, inputDays) && inputDays.size != courseDays.size
-      );
-    case ">":
-      // inputDays is a proper subset of courseDays
-      return (
-        setSubset(inputDays, courseDays) && inputDays.size != courseDays.size
-      );
-    default:
-      return false;
-  }
-}
-
-function setSubset<T>(a: Set<T>, b: Set<T>) {
-  if (a.size > b.size) return false;
-  for (const elem of a) if (!b.has(elem)) return false;
-  return true;
-}
-
 ///// Course scheduling
 
 function courseConflictWithSchedule(
@@ -840,11 +708,14 @@ function attachListeners() {
 function processSearchText() {
   const searchText = courseSearchInput.value.trim().split(/\s+/);
   let filterKeywordsValues: string[] = [];
-  for (let key of Object.keys(filterKeywords)) {
-    filterKeywordsValues = filterKeywordsValues.concat(filterKeywords[key]);
+  for (let key of Object.keys(Filter.filterKeywords)) {
+    filterKeywordsValues = filterKeywordsValues.concat(
+      Filter.filterKeywords[key]
+    );
   }
   let filtersText = [];
   let queryText = [];
+  let timeText = "";
 
   for (let text of searchText) {
     text = text.toLowerCase();
@@ -854,39 +725,18 @@ function processSearchText() {
       }, filterKeywordsValues)
     ) {
       filtersText.push(text);
+    } else if (Filter.isTimeRange(text)) {
+      // Looks only at one time range.
+      timeText = text;
     } else {
       queryText.push(text);
     }
   }
 
-  const query = getSearchQuery(queryText);
-  const filters = getSearchTextFilters(filtersText);
-
-  return { query, filters };
-}
-
-function getSearchQuery(searchTextArray: string[]) {
-  return searchTextArray.map((subquery: string) => {
-    return new RegExp(quoteRegexp(subquery), "i");
-  });
-}
-
-function getSearchTextFilters(filtersTextArray: string[]) {
-  let filter: Record<string, string> = {};
-  for (let text of filtersTextArray) {
-    let keyword = text.split(":")[0] + ":";
-    const filterText = text.split(":")[1];
-    if (!(keyword in Object.keys(filterKeywords))) {
-      for (let key of Object.keys(filterKeywords)) {
-        if (filterKeywords[key].includes(keyword)) {
-          keyword = key;
-          break;
-        }
-      }
-    }
-    filter[keyword] = filterText;
-  }
-  return filter;
+  const query = Filter.getSearchQuery(queryText);
+  const filters = Filter.getSearchTextFilters(filtersText);
+  const time = Filter.getTimeFilter(timeText);
+  return { query, filters, time };
 }
 
 //// DOM updates
@@ -939,7 +789,7 @@ function updateCourseSearchResults() {
   if (gApiData === null) {
     gFilteredCourseKeys = [];
   } else {
-    const { query, filters } = processSearchText();
+    const { query, filters, time } = processSearchText();
 
     gFilteredCourseKeys =
       gApiData === null
@@ -947,8 +797,9 @@ function updateCourseSearchResults() {
         : Object.keys(gApiData.data.courses).filter(key => {
             const course = gApiData!.data.courses[key];
             return (
-              courseMatchesSearchQuery(course, query) &&
-              coursePassesTextFilters(course, filters) &&
+              Filter.courseMatchesSearchQuery(course, query) &&
+              Filter.coursePassesTextFilters(course, filters) &&
+              Filter.coursePassesTimeFilters(course, time) &&
               (gShowClosedCourses || !Course.isClosed(course)) &&
               (!gHideAllConflictingCourses ||
                 !courseConflictWithSchedule(course, false)) &&
